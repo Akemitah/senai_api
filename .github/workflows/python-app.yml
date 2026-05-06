@@ -46,4 +46,7 @@ jobs:
         uses: docker/build-push-action@v7.1.0
         with:
           push: true
+          tags: |
+            akemiiih/senai_api:latest
+            akemiiih/senai_api:${{github.sha}}
           
