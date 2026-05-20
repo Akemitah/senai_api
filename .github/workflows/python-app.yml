@@ -2,18 +2,21 @@ name: Python application
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
+
+env:
+  IMAGE_NAME: akemiiih/senai_api
 
 permissions:
   contents: read
 
 jobs:
+
   BUILD:
     name: Compilar Projeto
     runs-on: ubuntu-latest
-    
     steps:
       - uses: actions/checkout@v4
 
@@ -57,33 +60,48 @@ jobs:
           context: .
           push: true
           tags: |
-            akemiiih/senai_api:latest
-            akemiiih/senai_api:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-  DEPLOY:
-    name: Implementando na EC2
+  DEPLOY_HOMOL:
+    name: Deploy em Homologação
     runs-on: ubuntu-latest
     needs: IMAGEM
-    
+    if: github.ref == 'refs/heads/develop'
     steps:
-      - name: Deploy na EC2 via SSH
+      - name: Deploy na EC2 Homologação via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST_HOMOL }}
+          username: ${{ secrets.EC2_USERNAME_HOMOL }}
+          key: ${{ secrets.EC2_SSH_KEY_HOMOL }}
+          script: |
+            sudo docker pull ${{ env.IMAGE_NAME }}:latest
+            sudo docker stop senai_api_homol 2>/dev/null || true
+            sudo docker rm senai_api_homol 2>/dev/null || true
+            sudo docker run --name senai_api_homol -d --restart unless-stopped -p 8080:8080 ${{ env.IMAGE_NAME }}:latest
+            sleep 5
+            curl -f http://localhost:8080/health || exit 1
+            echo "Deploy Homologação feito com sucesso!"
+
+  DEPLOY_PRD:
+    name: Deploy em Produção
+    runs-on: ubuntu-latest
+    needs: IMAGEM
+    if: github.ref == 'refs/heads/main'
+    environment: producao
+    steps:
+      - name: Deploy na EC2 Produção via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_KEY }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Fazer pull da imagem atualizada do Docker Hub
-            sudo docker pull akemiiih/senai_api:latest
-            
-            # Parar aplicação atual e remover container se existirem
+            sudo docker pull ${{ env.IMAGE_NAME }}:latest
             sudo docker stop senai_api 2>/dev/null || true
             sudo docker rm senai_api 2>/dev/null || true
-
-            # Publicar o novo container (Porta externa 80 -> Porta interna do container 8080)
-            sudo docker run --name senai_api -d --restart unless-stopped -p 80:8080 akemiiih/senai_api:latest
-
-            # Verificar se publicou com sucesso testando a porta externa (80)
+            sudo docker run --name senai_api -d --restart unless-stopped -p 80:8080 ${{ env.IMAGE_NAME }}:latest
             sleep 5
             curl -f http://localhost/health || exit 1
-            echo "Deploy feito com sucesso!"
+            echo "Deploy Produção feito com sucesso!"
